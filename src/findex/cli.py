@@ -5,17 +5,22 @@ below); results go to stdout. Expected failures (missing index, bad query) print
 single ``error: ...`` line to stderr and exit with status 1, with no traceback.
 """
 
+import asyncio
 import json
 import logging
 import os
 import pickle
 import sys
 from collections.abc import Iterable, Iterator
+from contextlib import aclosing
 from pathlib import Path
 from typing import Annotated, Literal
 
+import httpx
 import typer
 from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -27,6 +32,8 @@ from rich.table import Table
 
 from . import __version__
 from .corpus import Document, iter_documents, read_text
+from .crawler import CrawlStats
+from .crawler import crawl as crawl_pages
 from .index import Index, Layout, build_index
 from .parallel import ExecutorName, build_parallel
 from .query import QueryError, parse
@@ -137,6 +144,75 @@ def index(
     save(idx, out, fmt)
     log.info("saved %s", out)
     typer.echo(f"indexed {idx.num_docs} documents, {len(idx)} terms -> {out}")
+
+
+async def _run_crawl(
+    url: str,
+    out: Path,
+    max_pages: int,
+    concurrency: int,
+    per_host: int,
+    delay: float,
+    timeout: float,
+    quiet: bool,
+) -> CrawlStats:
+    stats = CrawlStats()
+
+    def panel() -> Panel:
+        return Panel(
+            f"collected [bold]{stats.pages}[/] / {max_pages}   {stats.pages_per_s:5.1f} pages/s\n"
+            f"in flight [bold]{stats.in_flight}[/]   queue depth [bold]{stats.queued}[/]   "
+            f"errors [bold]{stats.errors}[/]   robots-skipped {stats.skipped_robots}",
+            title=f"crawling {url}",
+        )
+
+    limits = httpx.Limits(max_connections=max(concurrency, 1) + 2)
+    async with httpx.AsyncClient(follow_redirects=True, max_redirects=5, limits=limits) as client:
+        with out.open("w", encoding="utf-8") as fh, Live(get_renderable=panel, console=err_console,
+                                                         refresh_per_second=8, transient=False) as live:
+            if quiet:
+                live.console.quiet = True
+            async with aclosing(
+                crawl_pages([url], client, max_pages=max_pages, concurrency=concurrency, per_host=per_host,
+                            min_delay=delay, timeout=timeout, stats=stats)
+            ) as pages:
+                async for page in pages:  # written as pages arrive: nothing accumulates in memory
+                    fh.write(json.dumps({"url": page.url, "title": page.title, "status": page.status,
+                                         "depth": page.depth, "text": f"{page.title}\n{page.text}"},
+                                        ensure_ascii=False) + "\n")
+                    fh.flush()
+    return stats
+
+
+@app.command()
+def crawl(
+    url: Annotated[str, typer.Argument(help="Start URL (only crawl what you are allowed to!)")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="JSONL file, one page per line")] = Path("pages.jsonl"),
+    max_pages: Annotated[int, typer.Option(min=1, help="Stop after this many pages")] = 200,
+    concurrency: Annotated[int, typer.Option(min=1, help="Concurrent requests overall")] = 5,
+    per_host: Annotated[int, typer.Option(min=1, help="Concurrent requests per host")] = 2,
+    delay: Annotated[float, typer.Option(min=0.0, help="Min seconds between requests to one host")] = 0.0,
+    timeout: Annotated[float, typer.Option(min=0.1, help="Per-request timeout, seconds")] = 10.0,
+    log_file: Annotated[Path, typer.Option(help="Per-URL status log")] = Path("crawl.log"),
+    debug: Annotated[bool, typer.Option(help="asyncio debug mode: warns when something blocks the loop")] = False,
+) -> None:
+    """Crawl a site politely (robots.txt, retries, per-host limits) into a JSONL file."""
+    crawl_log = logging.getLogger("findex.crawl")
+    handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    crawl_log.addHandler(handler)
+    crawl_log.setLevel(logging.INFO)
+    crawl_log.propagate = logging.getLogger().level <= logging.INFO  # keep the live display clean by default
+    try:
+        stats = asyncio.run(
+            _run_crawl(url, out, max_pages, concurrency, per_host, delay, timeout, quiet=False), debug=debug
+        )
+    except KeyboardInterrupt:
+        raise _fail("interrupted") from None
+    finally:
+        crawl_log.removeHandler(handler)
+        handler.close()
+    typer.echo(f"crawled {stats.pages} pages ({stats.errors} errors) -> {out}; per-URL log: {log_file}")
 
 
 @app.command()
