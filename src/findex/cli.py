@@ -11,6 +11,7 @@ import logging
 import os
 import pickle
 import sys
+import time
 from collections.abc import Iterable, Iterator
 from contextlib import aclosing
 from pathlib import Path
@@ -31,15 +32,13 @@ from rich.progress import (
 from rich.table import Table
 
 from . import __version__
-from .corpus import Document, iter_documents, read_text
+from .corpus import Document, iter_documents
 from .crawler import CrawlStats
 from .crawler import crawl as crawl_pages
 from .index import Index, Layout, build_index
+from .modes import Mode, ranked_hits
 from .parallel import ExecutorName, build_parallel
-from .query import QueryError, parse
-from .ranking import search as ranked_search
-from .scoring import BM25, Scorer, TfIdf
-from .snippets import make_snippet
+from .query import QueryError
 from .store import Format, load, save
 
 log = logging.getLogger("findex")
@@ -222,29 +221,32 @@ def search(
     scorer: Annotated[ScorerName, typer.Option(help="Ranking function")] = "bm25",
     top: Annotated[int, typer.Option("--top", "-k", min=1, help="Number of results")] = 10,
     as_json: Annotated[bool, typer.Option("--json", help="Machine-readable output on stdout")] = False,
+    mode: Annotated[Mode, typer.Option(help="lexical | semantic | hybrid (the last two need --embeddings)")] = "lexical",
+    embeddings: Annotated[Path | None, typer.Option(help="Embeddings .npy made by `findex embed`")] = None,
 ) -> None:
-    """Ranked search with snippets."""
+    """Ranked search with snippets (keywords, semantic, or hybrid BM25 + embeddings fused with RRF)."""
     idx = _load_index(index_path)
-    scorer_obj: Scorer = TfIdf() if scorer == "tfidf" else BM25()
+    sem = None
+    if mode != "lexical":
+        if embeddings is None or not embeddings.is_file():
+            raise _fail("semantic/hybrid mode needs --embeddings <file made by `findex embed`>")
+        from .semantic import SemanticIndex
+
+        sem = SemanticIndex.load(embeddings)
     try:
-        results = ranked_search(idx, query, scorer_obj, k=top)
-        terms = parse(query).terms()
+        hits, _total = ranked_hits(idx, query, scorer, mode, top, 1, sem)
     except QueryError as exc:
         raise _fail(f"bad query: {exc}") from exc
 
     rows: list[dict[str, object]] = []
-    for r in results:
-        path = idx.doc_meta[r.doc_id].path
-        text = read_text(Path(path)) if Path(path).is_file() else None
-        snippet = make_snippet(text, terms) if text else ""
-        rows.append(
-            {"doc_id": r.doc_id, "score": round(r.score, 4), "title": r.title, "path": path, "snippet": snippet}
-        )
+    for h in hits:
+        meta = idx.doc_meta[h.doc_id]
+        rows.append({"doc_id": h.doc_id, "score": h.score, "title": meta.title, "path": meta.path, "snippet": h.snippet})
     if as_json:
         typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
         return
 
-    table = Table(title=f"{len(rows)} results for {query!r} ({scorer})", show_lines=True)
+    table = Table(title=f"{len(rows)} results for {query!r} ({mode}, {scorer})", show_lines=True)
     table.add_column("#", justify="right")
     table.add_column("score", justify="right")
     table.add_column("title")
@@ -253,6 +255,31 @@ def search(
         snippet = str(row["snippet"]).replace("**", "")
         table.add_row(str(n), f"{row['score']}", str(row["title"]), snippet)
     Console().print(table)
+
+
+@app.command()
+def embed(
+    root: Annotated[Path, typer.Argument(help="Corpus directory (.txt files) or .jsonl file")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Embeddings matrix (.npy); a .meta.npz is written next to it")] = Path("embeddings.npy"),
+    limit: Annotated[int | None, typer.Option(help="Only the first N documents")] = None,
+    max_chunks_per_doc: Annotated[int | None, typer.Option(min=1, help="Embed an evenly spaced sample of at most N chunks per document")] = None,
+) -> None:
+    """Split documents into chunks, embed them (all-MiniLM-L6-v2) and save the normalised matrix."""
+    from .semantic import embed_corpus
+
+    if not root.exists():
+        raise _fail(f"corpus not found: {root}")
+    docs: Iterable[Document] = iter_documents(root)
+    if limit is not None:
+        docs = (d for i, d in enumerate(docs) if i < limit)
+    t0 = time.perf_counter()
+
+    def report(n_chunks: int) -> None:
+        err_console.print(f"embedded {n_chunks} chunks ({n_chunks / max(1e-9, time.perf_counter() - t0):.0f}/s)", end="\r")
+
+    sem = embed_corpus(docs, progress=report, max_chunks_per_doc=max_chunks_per_doc)
+    sem.save(out)
+    typer.echo(f"embedded {len(sem)} chunks of {len(sem.doc_ids)} documents -> {out} ({out.stat().st_size / 2**20:.1f} MiB)")
 
 
 @app.command()

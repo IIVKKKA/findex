@@ -7,6 +7,13 @@
     <option value="bm25" {% if scorer == "bm25" %}selected{% endif %}>BM25</option>
     <option value="tfidf" {% if scorer == "tfidf" %}selected{% endif %}>TF-IDF</option>
   </select>
+  {% if has_semantic %}
+  <select name="mode" aria-label="Search mode">
+    <option value="lexical" {% if mode == "lexical" %}selected{% endif %}>Keywords</option>
+    <option value="semantic" {% if mode == "semantic" %}selected{% endif %}>Semantic</option>
+    <option value="hybrid" {% if mode == "hybrid" %}selected{% endif %}>Hybrid</option>
+  </select>
+  {% endif %}
   <button type="submit">Search</button>
 </form>
 <div class="hint">Operators: <code>AND</code> <code>OR</code> <code>NOT</code>, parentheses, <code>"exact phrase"</code>. {{ "{:,}".format(docs) }} documents, {{ "{:,}".format(terms) }} terms.</div>
@@ -33,8 +40,8 @@
     <p>No results. Try fewer or different words.</p>
   {% endfor %}
   <nav class="pager">
-    {% if result.page > 1 %}<a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&page={{ result.page - 1 }}">&larr; Previous</a>{% else %}<span></span>{% endif %}
-    {% if result.page < result.pages %}<a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&page={{ result.page + 1 }}">Next &rarr;</a>{% endif %}
+    {% if result.page > 1 %}<a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&mode={{ mode }}&page={{ result.page - 1 }}">&larr; Previous</a>{% else %}<span></span>{% endif %}
+    {% if result.page < result.pages %}<a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&mode={{ mode }}&page={{ result.page + 1 }}">Next &rarr;</a>{% endif %}
   </nav>
 {% endif %}
 {% endblock %}

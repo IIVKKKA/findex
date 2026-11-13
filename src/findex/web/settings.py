@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     index_path: Path = Path("index.bin")
+    embeddings_path: Path | None = None  # optional: enables mode=semantic / hybrid
     log_level: str = "INFO"
     max_page_size: int = 50
 

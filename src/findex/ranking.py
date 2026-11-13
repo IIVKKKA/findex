@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import heapq
 import logging
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from functools import lru_cache
 
@@ -53,3 +54,18 @@ def search(index: Index, query: str, scorer: Scorer | None = None, k: int = 10) 
     )
     # nlargest is O(n log k) and keeps only k items; sorted()[:k] is O(n log n)
     return heapq.nlargest(k, results)
+
+
+def present_terms(index: Index, doc_id: int, terms: set[str]) -> set[str]:
+    """The query terms that actually occur in ``doc_id`` (binary search in each sorted postings list).
+
+    Lets the snippet code stop as soon as one window covers all terms *this document has*
+    instead of scanning the whole book looking for terms it does not contain (lab 8).
+    """
+    out: set[str] = set()
+    for t in terms:
+        ids = index.doc_ids(t)
+        i = bisect_left(ids, doc_id)
+        if i < len(ids) and ids[i] == doc_id:
+            out.add(t)
+    return out

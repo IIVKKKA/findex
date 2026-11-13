@@ -112,6 +112,8 @@ def main() -> None:
         proc = start(port, workers, app, args.index)
         try:
             url = f"http://127.0.0.1:{port}{route}?q=whale+OR+harpoon+OR+ship&k=10"
+            time.sleep(8 * workers)  # /health answers as soon as ONE worker is up; let all of them finish loading
+            oha(args.oha, url, 3, 20)  # warm-up run, not recorded
             rows.append((label, oha(args.oha, url, args.seconds)))
         finally:
             proc.terminate()

@@ -1,13 +1,15 @@
 [project]
 name = "findex"
-version = "0.7.0"
+version = "1.0.0"
 description = "A small search engine built lab by lab: lazy corpus, inverted index, BM25, CLI."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.162.5",
+    "fastembed>=0.9.1",
     "httpx>=0.28.1",
     "jinja2>=3.1.6",
+    "numpy>=2.5.4",
     "pydantic-settings>=2.16.2",
     "rich>=15.0.0",
     "selectolax>=1.0.2",
@@ -26,11 +28,15 @@ build-backend = "uv_build"
 dev = [
     "hypothesis>=6.170.15",
     "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
     "psutil>=7.2.2",
+    "py-spy>=0.4.3",
     "pyright>=1.1.414",
     "pytest>=9.2.0",
+    "pytest-benchmark>=5.3.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.5",
+    "scalene>=2.4.0",
 ]
 
 [tool.pyright]

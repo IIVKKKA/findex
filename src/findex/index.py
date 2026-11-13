@@ -200,9 +200,7 @@ def build_index(
             n = sum(len(v) for v in pos.values())
             items = [(t, len(v), v) for t, v in pos.items()]
         else:
-            counts: Counter[str] = Counter()
-            for tok in tokenize(doc.text):
-                counts[tok] += 1
+            counts = Counter(tokenize(doc.text))  # counted in C (_count_elements), not a Python loop
             n = counts.total()
             items = [(t, c, None) for t, c in counts.items()]
         doc_lengths[doc.doc_id] = n

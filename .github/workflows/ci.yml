@@ -15,4 +15,10 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run pyright
-      - run: uv run pytest --cov
+      - run: uv run pytest --cov --benchmark-disable
+      - name: Benchmarks (search / build_index timings are printed so slowdowns are visible)
+        run: uv run pytest tests/test_benchmarks.py --benchmark-only --benchmark-columns=min,mean,stddev,rounds --benchmark-json=benchmark.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: benchmark.json

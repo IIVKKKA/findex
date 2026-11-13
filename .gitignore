@@ -23,3 +23,5 @@ eval_*.err
 .pytest_cache/
 bench_*.md
 .venv-ft/
+embeddings.npy
+embeddings.meta.npz

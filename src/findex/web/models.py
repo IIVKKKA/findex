@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 ScorerName = Literal["bm25", "tfidf"]
+Mode = Literal["lexical", "semantic", "hybrid"]
 
 
 class HitOut(BaseModel):
@@ -17,6 +18,7 @@ class HitOut(BaseModel):
 class SearchOut(BaseModel):
     query: str
     scorer: ScorerName
+    mode: Mode = "lexical"
     page: int
     per_page: int
     total: int = Field(description="Number of documents matching the query")

@@ -148,3 +148,28 @@ def test_response_carries_generated_request_id(client: TestClient) -> None:
 def test_openapi_docs_moved_so_docs_route_is_ours(client: TestClient) -> None:
     assert client.get("/api/docs").status_code == 200
     assert client.get("/docs/1").json()["doc_id"] == 1
+
+
+def test_semantic_and_hybrid_modes_via_dependency_override(array_index: Index, corpus_dir: Path) -> None:
+    from findex.corpus import iter_documents
+    from findex.semantic import embed_corpus
+    from findex.web.app import get_semantic
+
+    from .test_semantic import fake_embed
+
+    sem = embed_corpus(iter_documents(corpus_dir), embed=fake_embed)
+    app = create_app(Settings(index_path=Path("none.bin")))
+    app.dependency_overrides[get_index] = lambda: array_index
+    app.dependency_overrides[get_semantic] = lambda: sem
+    with TestClient(app) as c:
+        for mode in ("semantic", "hybrid"):
+            r = c.get("/search", params={"q": "event loop threads", "mode": mode, "k": 3})
+            assert r.status_code == 200 and r.json()["mode"] == mode and r.json()["results"][0]["doc_id"] in (0, 1)
+        page = c.get("/", params={"q": "event loop threads", "mode": "semantic"})
+        assert page.status_code == 200 and 'value="semantic" selected' in page.text
+        assert c.get("/search", params={"q": "x", "mode": "bogus"}).status_code == 422
+
+
+def test_semantic_mode_503_when_no_embeddings_loaded(client: TestClient) -> None:
+    r = client.get("/search", params={"q": "python", "mode": "semantic"})
+    assert r.status_code == 503 and "no embeddings" in r.json()["detail"]

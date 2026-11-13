@@ -9,7 +9,6 @@
 
 import html
 import logging
-import math
 import re
 import time
 import uuid
@@ -25,15 +24,22 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
 from .. import __version__
-from ..corpus import read_text
 from ..index import Index
+from ..modes import doc_text, n_pages, numpy_for, ranked_hits
 from ..query import QueryError, parse
-from ..ranking import match_ids
-from ..ranking import search as ranked_search
-from ..scoring import BM25, Scorer, TfIdf
+from ..semantic import SemanticIndex
 from ..snippets import make_snippet
 from ..store import load
-from .models import DocOut, ErrorOut, HealthOut, HitOut, ScorerName, SearchOut, StatsOut
+from .models import (
+    DocOut,
+    ErrorOut,
+    HealthOut,
+    HitOut,
+    Mode,
+    ScorerName,
+    SearchOut,
+    StatsOut,
+)
 from .settings import Settings, get_settings
 
 log = logging.getLogger("findex.web")
@@ -56,10 +62,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         t0 = time.perf_counter()
         app.state.index = await run_in_threadpool(load, settings.index_path)  # keep the loop responsive
         idx: Index = app.state.index
+        await run_in_threadpool(numpy_for, idx)  # build the NumPy view at startup, not inside the first request
         log.info("loaded %s: %d docs, %d terms in %.2fs", settings.index_path, idx.num_docs, len(idx),
                  time.perf_counter() - t0)
     else:
         log.error("index file %s not found; /health will report 503", settings.index_path)
+    app.state.semantic = None
+    if settings.embeddings_path is not None and settings.embeddings_path.is_file():
+        app.state.semantic = SemanticIndex.load(settings.embeddings_path)  # memory-mapped matrix
+        log.info("semantic search enabled: %d chunks", len(app.state.semantic))
     yield
     if app.state.index is not None:
         app.state.index.close()
@@ -75,30 +86,31 @@ def get_index(request: Request) -> Index:
 IndexDep = Annotated[Index, Depends(get_index)]
 
 
-def _scorer(name: ScorerName) -> Scorer:
-    return TfIdf() if name == "tfidf" else BM25()
+def get_semantic(request: Request) -> SemanticIndex | None:
+    sem: SemanticIndex | None = request.app.state.semantic
+    return sem
+
+
+SemanticDep = Annotated[SemanticIndex | None, Depends(get_semantic)]
 
 
 def _doc_text(index: Index, doc_id: int) -> str:
-    path = Path(index.doc_meta[doc_id].path)
-    return (read_text(path) or "") if path.is_file() else ""
+    return doc_text(index, doc_id)
 
 
-def run_search(index: Index, q: str, scorer: ScorerName, k: int, page: int) -> SearchOut:
+def run_search(
+    index: Index, q: str, scorer: ScorerName, k: int, page: int,
+    mode: Mode = "lexical", sem: SemanticIndex | None = None,
+) -> SearchOut:
     try:
-        tree = parse(q)
-        total = len(match_ids(index, q))
-        top = ranked_search(index, q, _scorer(scorer), k=page * k)
+        hits, total = ranked_hits(index, q, scorer, mode, k, page, sem)
     except QueryError as exc:
         raise HTTPException(status_code=422, detail=f"bad query: {exc}") from exc
-    terms = tree.terms()
-    hits = [
-        HitOut(doc_id=r.doc_id, score=round(r.score, 4), title=r.title,
-               snippet=make_snippet(_doc_text(index, r.doc_id), terms))
-        for r in top[(page - 1) * k : page * k]
-    ]
-    return SearchOut(query=q, scorer=scorer, page=page, per_page=k, total=total,
-                     pages=max(1, math.ceil(total / k)), results=hits)
+    except LookupError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    out = [HitOut(doc_id=h.doc_id, score=h.score, title=index.doc_meta[h.doc_id].title, snippet=h.snippet) for h in hits]
+    return SearchOut(query=q, scorer=scorer, mode=mode, page=page, per_page=k, total=total,
+                     pages=n_pages(total, k), results=out)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -108,6 +120,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings or get_settings()
     app.state.index = None
+    app.state.semantic = None
     logging.basicConfig(level=app.state.settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     @app.middleware("http")
@@ -127,12 +140,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/search", response_model=SearchOut, responses={422: {"model": ErrorOut}, 503: {"model": ErrorOut}})
     def search(
         index: IndexDep,
+        sem: SemanticDep,
         q: Annotated[str, Query(min_length=1, max_length=200, description="Query: AND/OR/NOT, (), quoted phrases")],
         k: Annotated[int, Query(ge=1, le=50, description="Results per page")] = 10,
         scorer: ScorerName = "bm25",
+        mode: Mode = "lexical",
         page: Annotated[int, Query(ge=1, le=100)] = 1,
     ) -> SearchOut:
-        return run_search(index, q, scorer, k, page)
+        return run_search(index, q, scorer, k, page, mode, sem)
 
     @app.get("/docs/{doc_id}", response_model=DocOut, responses={404: {"model": ErrorOut}})
     def get_doc(doc_id: int, index: IndexDep) -> DocOut:
@@ -160,18 +175,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def home(
         request: Request,
         index: IndexDep,
+        sem: SemanticDep,
         q: Annotated[str, Query(max_length=200)] = "",
         scorer: ScorerName = "bm25",
+        mode: Mode = "lexical",
         page: Annotated[int, Query(ge=1, le=100)] = 1,
     ) -> HTMLResponse:
         result: SearchOut | None = None
         error = ""
         if q.strip():
             try:
-                result = run_search(index, q, scorer, 10, page)
+                result = run_search(index, q, scorer, 10, page, mode, sem)
             except HTTPException as exc:
                 error = str(exc.detail)
-        ctx = {"q": q, "scorer": scorer, "result": result, "error": error, "docs": index.num_docs,
+        ctx = {"q": q, "scorer": scorer, "mode": mode, "has_semantic": sem is not None, "result": result, "error": error, "docs": index.num_docs,
                "terms": len(index), "version": __version__}
         return TEMPLATES.TemplateResponse(request, "index.html", ctx, status_code=422 if error else 200)
 
