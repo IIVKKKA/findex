@@ -10,12 +10,14 @@ Usage: python -m findex.search index.bin "query" [--engine merge|set]
 from __future__ import annotations
 
 import argparse
+import logging
 import time
 import tracemalloc
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
+from .corpus import _read_text
 from .index import Index
 from .store import load
 from .tokenize import tokenize
@@ -142,22 +144,52 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("query")
     ap.add_argument("--engine", choices=["merge", "set"], default="merge")
     ap.add_argument("--top", type=int, default=10, help="how many hits to print")
+    ap.add_argument(
+        "--scorer",
+        choices=["none", "tfidf", "bm25"],
+        default="none",
+        help="none = lab 2 boolean (doc_id order); tfidf/bm25 = ranked, with the full "
+        "query language (parentheses, quoted phrases) and snippets",
+    )
+    ap.add_argument("-v", "--verbose", action="store_true", help="show @timed / cache logs")
     args = ap.parse_args(argv)
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     tracemalloc.start()
     t0 = time.perf_counter()
     index = load(args.index)
     load_s = time.perf_counter() - t0
     t0 = time.perf_counter()
-    hits = search(index, args.query, args.engine)
-    search_s = time.perf_counter() - t0
+    if args.scorer == "none":
+        hits = search(index, args.query, args.engine)
+        search_s = time.perf_counter() - t0
+        print(f"{len(hits)} hits for {args.query!r} (engine={args.engine})")
+        for doc_id in hits[: args.top]:
+            m = index.doc_meta[doc_id]
+            print(f"  [{doc_id}] {m.title}  ({Path(m.path).name})")
+    else:
+        from .query import QueryError, parse
+        from .ranking import search as ranked_search
+        from .scoring import BM25, TfIdf
+        from .snippets import make_snippet
+
+        try:
+            results = ranked_search(
+                index, args.query, TfIdf() if args.scorer == "tfidf" else BM25(), k=args.top
+            )
+        except QueryError as exc:
+            raise SystemExit(f"query error: {exc}") from exc
+        search_s = time.perf_counter() - t0
+        terms = parse(args.query).terms()
+        print(f"top {len(results)} for {args.query!r} (scorer={args.scorer})")
+        for r in results:
+            m = index.doc_meta[r.doc_id]
+            text = _read_text(Path(m.path)) or ""
+            print(f"  [{r.doc_id}] {r.score:.3f}  {m.title}  ({Path(m.path).name})")
+            print(f"      {make_snippet(text, terms)}")
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
-
-    print(f"{len(hits)} hits for {args.query!r} (engine={args.engine})")
-    for doc_id in hits[: args.top]:
-        m = index.doc_meta[doc_id]
-        print(f"  [{doc_id}] {m.title}  ({Path(m.path).name})")
     print(f"load:       {load_s:.3f} s")
     print(f"search:     {search_s * 1000:.3f} ms")
     print(f"peak mem:   {peak / 2**20:.1f} MiB (tracemalloc, load+search)")

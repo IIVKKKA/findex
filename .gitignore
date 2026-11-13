@@ -13,3 +13,7 @@ data/
 dl.log
 bench_*.md
 bench_*.err
+index.bin
+*.log
+eval_*.md
+eval_*.err

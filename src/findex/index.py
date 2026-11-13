@@ -17,14 +17,16 @@ import time
 import tracemalloc
 from array import array
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 from itertools import islice
 from pathlib import Path
 from typing import Literal
 
 from .corpus import Document, iter_documents
 from .tokenize import tokenize
+from .util import timed
 
 Layout = Literal["dataclass", "slots", "array"]
 
@@ -64,17 +66,85 @@ class ArrayPostings:
 Postings = list[Posting] | list[PlainPosting] | ArrayPostings
 
 
-@dataclass
-class Index:
-    postings: dict[str, Postings]
-    doc_lengths: dict[int, int]
-    doc_meta: dict[int, DocMeta]
-    layout: Layout = "slots"
-    has_positions: bool = False
+class Index(Mapping[str, list[Posting]]):
+    """An inverted index that behaves like a read-only ``dict[term, postings]``.
 
+    ``len(index)`` = number of terms, ``term in index``, ``index[term]`` ->
+    ``list[Posting]`` (``KeyError`` if absent), ``for term in index``.
+    """
+
+    def __init__(
+        self,
+        postings: dict[str, Postings],
+        doc_lengths: dict[int, int],
+        doc_meta: dict[int, DocMeta],
+        layout: Layout = "slots",
+        has_positions: bool = False,
+    ) -> None:
+        self.postings = postings
+        self.doc_lengths = doc_lengths
+        self.doc_meta = doc_meta
+        self.layout = layout
+        self.has_positions = has_positions
+
+    # --- Mapping protocol (the dunder methods the lab asks for) ---------------
+    def __len__(self) -> int:
+        return len(self.postings)
+
+    def __contains__(self, term: object) -> bool:
+        # Mapping's default would call __getitem__ and materialise postings
+        return term in self.postings
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.postings)
+
+    def __getitem__(self, term: str) -> list[Posting]:
+        p = self.postings[term]  # KeyError for unknown terms
+        if not isinstance(p, ArrayPostings):
+            return [Posting(x.doc_id, x.tf, x.positions) for x in p]
+        out: list[Posting] = []
+        off = 0
+        has = self.has_positions and p.positions is not None
+        for i, d in enumerate(p.doc_ids):
+            tf = p.tfs[i]
+            pos = tuple(p.positions[off : off + tf]) if has else ()  # type: ignore[index]
+            off += tf if has else 0
+            out.append(Posting(d, tf, pos))
+        return out
+
+    def __repr__(self) -> str:
+        return (
+            f"Index(terms={len(self)}, docs={self.num_docs}, "
+            f"layout={self.layout!r}, positions={self.has_positions})"
+        )
+
+    # Mapping defines __eq__ (comparing all items) which would make the index
+    # unhashable. Identity semantics are what we want: it is a big singleton
+    # object, and lru_cache needs to hash it.
+    def __eq__(self, other: object) -> bool:
+        return self is other
+
+    def __hash__(self) -> int:
+        return id(self)
+
+    # --- corpus-level numbers ----------------------------------------------------
     @property
     def num_docs(self) -> int:
         return len(self.doc_meta)
+
+    @cached_property
+    def avg_doc_length(self) -> float:
+        return sum(self.doc_lengths.values()) / max(1, len(self.doc_lengths))
+
+    def doc_length(self, doc_id: int) -> int:
+        return self.doc_lengths[doc_id]
+
+    def close(self) -> None:
+        """Release the big structures (used by ``open_index``)."""
+        self.postings = {}
+        self.doc_lengths = {}
+        self.doc_meta = {}
+        self.__dict__.pop("avg_doc_length", None)
 
     def doc_ids(self, term: str) -> Sequence[int]:
         """Sorted doc_ids containing ``term`` (empty if unknown)."""
@@ -93,13 +163,16 @@ class Index:
 
 
 def _title(text: str) -> str:
+    """First line that looks like a title (has letters, not "[Illustration]" etc.)."""
     for line in text.splitlines():
         line = line.strip()
-        if line:
-            return line[:80]
+        if sum(ch.isalpha() for ch in line) < 3 or line.startswith(("[", "***")):
+            continue
+        return line[:80]
     return ""
 
 
+@timed
 def build_index(
     docs: Iterable[Document], *, positions: bool = False, layout: Layout = "slots"
 ) -> Index:

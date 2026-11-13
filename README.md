@@ -168,3 +168,122 @@ Merge — цикл на чистому Python, `set(a) & set(b)` працює в
 merge усе одно обходить усі 500 тис. елементів, а `set` ітерує по меншому — тут потрібні стрибки (skip-pointers / бінарний пошук).
 Реальна відповідь — «залежить від форми даних».
 
+
+
+---
+
+# Лаба 3 — рейтинг і об'єктна модель (тег `lab-03`)
+
+Словники з лаби 2 тепер — об'єкт `Index`; булів пошук став рейтинговим (TF-IDF / BM25), з мовою запитів, сніпетами,
+`@timed` і `lru_cache`.
+
+```bash
+# індекс з позиціями (потрібні для фраз "...") — layout array, бінарний формат, 50.6 MiB
+uv run python -m findex.index data/gutenberg --out index.bin --layout array --positions --format binary
+uv run python -m findex.search index.bin '(whale OR harpoon) "white whale"' --scorer bm25 -v
+```
+
+## `Index` — API
+
+`Index` наслідує `collections.abc.Mapping[str, list[Posting]]` (файл `index.py`).
+
+```python
+from findex.store import open_index
+
+with open_index("index.bin") as index:      # завантажує на вході, звільняє в finally (і при винятку)
+    len(index)                  # 379464 термів
+    "whale" in index            # True  (не матеріалізує постинги)
+    index["whale"][0]           # Posting(doc_id=..., tf=..., positions=(...))
+    index["no-such-term"]       # KeyError
+    for term in index: ...      # ітерація по термах
+    index.num_docs, index.avg_doc_length, index.df("whale"), index.doc_length(6)
+    repr(index)                 # Index(terms=379464, docs=91, layout='array', positions=True)
+```
+
+`avg_doc_length` — `functools.cached_property`. `Mapping` задає `__eq__` через порівняння всіх елементів, що робить
+об'єкт нехешованим; оскільки `lru_cache` потребує хеш, `Index` порівнюється й хешується за ідентичністю.
+
+## Scorer і формули (`scoring.py`)
+
+`Scorer` — `typing.Protocol` з одним методом `score(term, posting, index) -> float`; `TfIdf` і `BM25` не наслідують нічого й
+взаємозамінні (duck typing).
+
+* **TF-IDF:** `score = (1 + ln tf) · ln(N / df)` — сублінійний tf, натуральний логарифм. Терм, що є в усіх документах, дає 0.
+* **BM25** (`k1=1.5`, `b=0.75`): `idf = ln(1 + (N − df + 0.5)/(df + 0.5))` (варіант Lucene, ≥ 0);
+  `score = idf · tf · (k1 + 1) / (tf + k1 · (1 − b + b · |d| / avgdl))`.
+
+`search(index, query, scorer=BM25(), k=10)` (`ranking.py`) розбирає запит, обчислює множину збігів, додає бали по термах
+лише для документів цієї множини і бере топ-k через `heapq.nlargest` (O(n log k), тримає k елементів, на відміну від
+`sorted(...)[:k]` — O(n log n)). Результат — `SearchResult(score, doc_id, title)` з `order=True`, тож `sorted(results)` працює.
+
+## Мова запитів (`query.py`)
+
+Рекурсивний спуск: `or_expr → and_expr ('OR' and_expr)*`, `and_expr → not_expr ('AND'? not_expr)*`,
+`not_expr → 'NOT' atom | atom`, `atom → слово | "фраза" | '(' or_expr ')'`. Вузли `Term / Phrase / And / Or / Not` мають
+перевантаження `&`, `|`, `~` та `evaluate(index) -> set[doc_id]`. Слова проходять той самий `tokenize`, що й індекс.
+`a OR b c` → `Or(a, And(b, c))`: `AND` зв'язує сильніше за `OR`. `Phrase` перевіряє послідовні позиції і вимагає індекс з
+`--positions`. Тести парсера порівнюють **дерева**, а не рядки (`tests/test_ranking.py`).
+
+## Таблиця 1 — три перевірки рейтингу (BM25, повний корпус)
+
+| # | Перевірка | Що спостерігаємо |
+|---|---|---|
+| 1 | Рідкий терм вище частого | `mersenne` (df=1, документ 59, tf=2) → **8.492**; `the` (df=91, tf=64 113!) → **0.014**. У запиті `the OR mersenne` перший — док. 59. |
+| 2 | 20-те повторення майже нічого не додає | Для `whale` у документі середньої довжини: tf=1 → 2.007; tf=2 → 2.862; tf=5 → 3.846; tf=10 → 4.344; tf=20 → 4.645 (+0.301); tf=40 → 4.811 (+0.166). Крива виходить на межу `idf·(k1+1)`. |
+| 3 | Короткий документ з одним входженням вище довгого | Один `whale`: найкоротший док. 53 (2 598 токенів) → **3.559**; найдовший док. 1 (964 721 токен, Shakespeare) → **0.434**. |
+
+(Перевірки 2–3 змінюють tf/довжину в самій формулі при реальних статистиках індексу: на корпусі немає пари документів, що
+різняться лише одним фактором.) Скрипт: `scripts/eval_lab3.py`.
+
+## Таблиця 2 — precision@5, 10 запитів, TF-IDF проти BM25
+
+Мітки «що має бути в топ-5» поставлено **до** запуску скорерів, за змістом книг (`doc_id` → `data/gutenberg/pgN.txt`:
+6 Moby-Dick, 74 Frankenstein, 87 The Monster Men, 11/17 Paradise Lost, 48 Paradise Regained, 30/39/65/70/46 тексти про
+Інтернет, 20/28 перепис США 1990, 5/38 CIA Factbook, 55/59 прості числа, 0/21 Біблія, 8 Книга Мормона, 89 Tale of Two
+Cities, 50 Scarlet Pimpernel, 90/14 Дуґлас, 57 Black Experience, 35/42 Anne, 9 Federalist, 80 Lincoln).
+
+| # | Запит | Релевантні | TF-IDF топ-5 | P@5 | BM25 топ-5 | P@5 |
+|---|---|---|---|---|---|---|
+| 1 | `frankenstein OR monster` | 74, 87 | 74, 1, 6, 87, 13 | 0.4 | 74, 87, 6, 3, 27 | 0.4 |
+| 2 | `paradise OR satan OR eden` | 11, 17, 48 | 11, 17, 21, 0, 8 | 0.4 | 11, 17, 48, 8, 24 | 0.6 |
+| 3 | `internet OR email OR network` | 30, 39, 46, 65, 70 | 70, 25, 29, 39, 65 | 0.6 | 70, 25, 29, 39, 46 | 0.6 |
+| 4 | `census OR population` | 5, 20, 28, 38 | 28, 20, 77, 38, 16 | 0.6 | 28, 20, 9, 57, 38 | 0.6 |
+| 5 | `prime OR primes OR mersenne` | 55, 59 | 59, 72, 77, 38, 55 | 0.4 | 59, 72, 55, 38, 5 | 0.4 |
+| 6 | `lord OR god OR commandments` | 0, 8, 21 | 21, 0, 8, 1, 18 | 0.6 | 8, 0, 21, 48, 88 | 0.6 |
+| 7 | `guillotine OR paris OR revolution` | 50, 89 | 50, 89, 1, 24, 60 | 0.4 | 50, 89, 60, 24, 71 | 0.4 |
+| 8 | `slavery OR freedom OR slaves` | 14, 57, 90 | 57, 14, 76, 1, 90 | 0.6 | 57, 14, 61, 90, 76 | 0.6 |
+| 9 | `anne OR gilbert OR marilla` | 35, 42 | 35, 37, 42, 1, 77 | 0.4 | 35, 42, 37, 16, 38 | 0.4 |
+| 10 | `constitution OR union OR states` | 9, 80 | 9, 77, 38, 16, 5 | 0.2 | 9, 38, 77, 16, 5 | 0.2 |
+| | **Середнє** | | | **0.46** | | **0.48** |
+
+Як читати: P@5 тут обмежене зверху числом розмічених документів (у запиті з 2 релевантними максимум 0.4 — його досягнуто у
+запитах 1, 5, 7, 9). Єдина різниця між скорерами — запит 2: BM25 підняв «Paradise Regained» (48) в топ-5, а TF-IDF віддав
+місця великим книгам (Біблія, Книга Мормона) — ймовірно, через відсутність нормалізації за довжиною. Запит 10 найгірший:
+`union` і `states` — звичайні слова в десятках документів, і Lincoln (80) не потрапив у топ-5. **Оцінка маленька й шумна**:
+10 запитів, 91 документ, мітки поставив один автор (і я лише здогадуюсь про релевантність книг, не читав їх повністю),
+різниця 0.46 проти 0.48 — це один документ в одному запиті, а не доказ переваги BM25.
+
+## Таблиця 3 — `@timed` і `lru_cache` у логах
+
+Запит `python OR "event loop" OR whale`, двічі підряд (`scripts/eval_lab3.py`; у CLI — прапорець `-v`):
+
+```
+INFO findex.ranking: query 'python OR "event loop" OR whale': 16 matches (cache miss)
+INFO findex.timing: search took 0.66 ms
+INFO findex.ranking: query 'python OR "event loop" OR whale': 16 matches (cache hit)
+INFO findex.timing: search took 0.23 ms
+CacheInfo(hits=1, misses=1, maxsize=256, currsize=1)
+```
+
+`@lru_cache(maxsize=256)` стоїть на `match_ids(index, query) -> frozenset[doc_id]` (парсинг + обчислення збігів), тож повторний
+запит пропускає саме цю частину; підрахунок балів усе одно виконується. `@timed` (з `functools.wraps`, логує в `finally`) стоїть
+на `search`, `build_index`, `load`.
+
+## Приклад сніпета
+
+Запит `(whale OR harpoon) "white whale"` → документ 6 «MOBY-DICK;», бал 13.223:
+
+> ...e whole crew were half suffocated as they were tossed helter-skelter into the **white** curdling cream of the squall. Squall, **whale**, and **harpoon** had all blended toget...
+
+Вікно ±80 символів навколо входження, що покриває найбільше різних термів запиту; терми підсвічено `**...**`.
+

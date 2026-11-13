@@ -15,10 +15,13 @@ import json
 import pickle
 import struct
 from array import array
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO, Literal
 
 from .index import ArrayPostings, DocMeta, Index, Posting
+from .util import timed
 
 MAGIC = b"FIDX1"
 Format = Literal["pickle", "binary"]
@@ -32,6 +35,21 @@ def save(index: Index, path: Path, fmt: Format = "pickle") -> None:
         _save_binary(index, path)
 
 
+@contextmanager
+def open_index(path: str | Path) -> Iterator[Index]:
+    """``with open_index(p) as index:`` - loads on enter, releases on exit.
+
+    The release runs in ``finally`` so it happens when the body raises, and the
+    exception is not suppressed.
+    """
+    index = load(Path(path))
+    try:
+        yield index
+    finally:
+        index.close()
+
+
+@timed
 def load(path: Path) -> Index:
     """Load an index; the format is detected from the first bytes.
 
@@ -108,16 +126,4 @@ def _load_binary(fh: BinaryIO) -> Index:
 
 def postings_as_objects(index: Index, term: str) -> list[Posting]:
     """Materialise Posting objects for one term (any layout)."""
-    p = index.postings.get(term)
-    if p is None:
-        return []
-    if not isinstance(p, ArrayPostings):
-        return [Posting(x.doc_id, x.tf, x.positions) for x in p]
-    out, off = [], 0
-    for i, d in enumerate(p.doc_ids):
-        tf = p.tfs[i]
-        has = index.has_positions and p.positions is not None
-        pos = tuple(p.positions[off : off + tf]) if has else ()  # type: ignore[index]
-        off += tf if has else 0
-        out.append(Posting(d, tf, pos))
-    return out
+    return index.get(term, [])
