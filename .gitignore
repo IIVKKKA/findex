@@ -11,3 +11,5 @@ wheels/
 
 data/
 dl.log
+bench_*.md
+bench_*.err
