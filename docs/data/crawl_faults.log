@@ -1,0 +1,49 @@
+2026-11-13 03:19:47,608 INFO 200 http://127.0.0.1:8777/ bytes=311 70ms attempts=1 
+2026-11-13 03:19:47,722 INFO 200 http://127.0.0.1:8777/page/0 bytes=3012 111ms attempts=1 
+2026-11-13 03:19:47,763 WARNING retry 1/3 for http://127.0.0.1:8777/flaky/0 (HTTP 503), sleeping 0.29s
+2026-11-13 03:19:47,768 WARNING retry 1/3 for http://127.0.0.1:8777/flaky/1 (HTTP 503), sleeping 0.33s
+2026-11-13 03:19:47,770 WARNING retry 1/3 for http://127.0.0.1:8777/limited/0 (HTTP 429), sleeping 1.00s
+2026-11-13 03:19:47,772 WARNING retry 1/3 for http://127.0.0.1:8777/limited/1 (HTTP 429), sleeping 1.00s
+2026-11-13 03:19:48,139 WARNING retry 2/3 for http://127.0.0.1:8777/flaky/0 (HTTP 503), sleeping 0.74s
+2026-11-13 03:19:48,183 WARNING retry 2/3 for http://127.0.0.1:8777/flaky/1 (HTTP 503), sleeping 0.32s
+2026-11-13 03:19:48,189 INFO ERR http://127.0.0.1:8777/loop/a bytes=0 466ms attempts=1 redirect loop
+2026-11-13 03:19:48,591 INFO 200 http://127.0.0.1:8777/flaky/1 bytes=80 976ms attempts=3 
+2026-11-13 03:19:48,591 INFO SKIP robots.txt http://127.0.0.1:8777/private/x
+2026-11-13 03:19:48,662 INFO 200 http://127.0.0.1:8777/page/1 bytes=3018 71ms attempts=1 
+2026-11-13 03:19:48,733 INFO 200 http://127.0.0.1:8777/page/399 bytes=3133 70ms attempts=1 
+2026-11-13 03:19:48,815 INFO 200 http://127.0.0.1:8777/page/231 bytes=2938 81ms attempts=1 
+2026-11-13 03:19:48,883 INFO 200 http://127.0.0.1:8777/limited/0 bytes=83 1266ms attempts=2 
+2026-11-13 03:19:48,932 INFO 200 http://127.0.0.1:8777/limited/1 bytes=83 1312ms attempts=2 
+2026-11-13 03:19:48,956 INFO 200 http://127.0.0.1:8777/page/286 bytes=3006 139ms attempts=1 
+2026-11-13 03:19:49,032 INFO 200 http://127.0.0.1:8777/page/2 bytes=3000 106ms attempts=1 
+2026-11-13 03:19:49,056 INFO 200 http://127.0.0.1:8777/page/238 bytes=2893 124ms attempts=1 
+2026-11-13 03:19:49,065 INFO 200 http://127.0.0.1:8777/flaky/0 bytes=80 1452ms attempts=3 
+2026-11-13 03:19:49,075 INFO 200 http://127.0.0.1:8777/page/260 bytes=3033 118ms attempts=1 
+2026-11-13 03:19:49,143 INFO 200 http://127.0.0.1:8777/page/398 bytes=3006 111ms attempts=1 
+2026-11-13 03:19:49,172 INFO 200 http://127.0.0.1:8777/page/299 bytes=2966 115ms attempts=1 
+2026-11-13 03:19:49,187 INFO 200 http://127.0.0.1:8777/page/246 bytes=2723 121ms attempts=1 
+2026-11-13 03:19:49,195 INFO 200 http://127.0.0.1:8777/page/18 bytes=2935 119ms attempts=1 
+2026-11-13 03:19:49,213 WARNING retry 1/3 for http://127.0.0.1:8777/slow (timeout after 1.0s), sleeping 0.28s
+2026-11-13 03:19:49,241 INFO 200 http://127.0.0.1:8777/page/232 bytes=2930 97ms attempts=1 
+2026-11-13 03:19:49,278 INFO 200 http://127.0.0.1:8777/page/230 bytes=2692 105ms attempts=1 
+2026-11-13 03:19:49,300 INFO 200 http://127.0.0.1:8777/page/80 bytes=2997 112ms attempts=1 
+2026-11-13 03:19:49,315 INFO 200 http://127.0.0.1:8777/page/144 bytes=3029 119ms attempts=1 
+2026-11-13 03:19:49,334 INFO 200 http://127.0.0.1:8777/page/344 bytes=2975 92ms attempts=1 
+2026-11-13 03:19:49,380 INFO 200 http://127.0.0.1:8777/page/287 bytes=2964 101ms attempts=1 
+2026-11-13 03:19:49,407 INFO 200 http://127.0.0.1:8777/page/285 bytes=2887 106ms attempts=1 
+2026-11-13 03:19:49,430 INFO 200 http://127.0.0.1:8777/page/138 bytes=2915 115ms attempts=1 
+2026-11-13 03:19:49,440 INFO 200 http://127.0.0.1:8777/page/145 bytes=3022 105ms attempts=1 
+2026-11-13 03:19:49,471 INFO 200 http://127.0.0.1:8777/page/3 bytes=3009 90ms attempts=1 
+2026-11-13 03:19:49,513 INFO 200 http://127.0.0.1:8777/page/300 bytes=2959 105ms attempts=1 
+2026-11-13 03:19:49,540 INFO 200 http://127.0.0.1:8777/page/97 bytes=2930 109ms attempts=1 
+2026-11-13 03:19:49,559 INFO 200 http://127.0.0.1:8777/page/94 bytes=2935 118ms attempts=1 
+2026-11-13 03:19:49,571 INFO 200 http://127.0.0.1:8777/page/239 bytes=2941 100ms attempts=1 
+2026-11-13 03:19:49,610 INFO 200 http://127.0.0.1:8777/page/237 bytes=2939 95ms attempts=1 
+2026-11-13 03:19:49,643 INFO 200 http://127.0.0.1:8777/page/191 bytes=2934 102ms attempts=1 
+2026-11-13 03:19:49,665 INFO 200 http://127.0.0.1:8777/page/6 bytes=3011 105ms attempts=1 
+2026-11-13 03:19:49,683 INFO 200 http://127.0.0.1:8777/page/324 bytes=3009 110ms attempts=1 
+2026-11-13 03:19:49,700 INFO 200 http://127.0.0.1:8777/page/261 bytes=2972 90ms attempts=1 
+2026-11-13 03:19:49,736 INFO 200 http://127.0.0.1:8777/page/259 bytes=2952 92ms attempts=1 
+2026-11-13 03:19:49,768 INFO 200 http://127.0.0.1:8777/page/172 bytes=2953 102ms attempts=1 
+2026-11-13 03:19:49,787 INFO 200 http://127.0.0.1:8777/page/110 bytes=2924 103ms attempts=1 
+2026-11-13 03:19:49,806 INFO 200 http://127.0.0.1:8777/page/337 bytes=2912 105ms attempts=1 
