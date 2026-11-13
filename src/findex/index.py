@@ -73,6 +73,9 @@ class Index(Mapping[str, list[Posting]]):
     ``list[Posting]`` (``KeyError`` if absent), ``for term in index``.
     """
 
+    layout: Layout
+    has_positions: bool
+
     def __init__(
         self,
         postings: dict[str, Postings],

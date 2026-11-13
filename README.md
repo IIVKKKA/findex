@@ -337,3 +337,69 @@ uv run ruff check . && uv run pyright
 (argparse; з лаб 1–2, їх замінює `findex`; код merge/пошуку звідти покрито окремо), `python -m findex.stats`
 (`main()` лаби 1; перевіряється лише порівняння lazy/eager), скрипт завантаження корпусу (мережа), рідкісні гілки читання
 `.jsonl` і недекодованих файлів та гілки `__main__`.
+
+
+---
+
+# Лаба 5 — конкурентність і GIL (тег `lab-05`)
+
+`build_index` розділено на `build_partial(paths, start_id)` і `merge(parts)` (`src/findex/parallel.py`).
+У воркер іде список **шляхів** (а не прочитані тексти), кожному шматку наперед видано діапазон `doc_id`, тому часткові
+індекси не перетинаються. Один і той самий код працює під `ThreadPoolExecutor`, `ProcessPoolExecutor` (метод `spawn`,
+безпечний на Windows) або звичайним циклом; якщо воркер падає, `build` падає разом із його стеком і скасовує решту завдань.
+Тест `test_serial_merge_of_one_partial_equals_lab4_index` перевіряє, що `merge([build_partial(усі шляхи)])` дає той самий індекс, що й лаба 4.
+
+```bash
+findex index data/gutenberg --out index.bin --workers 12 --executor processes   # типове значення
+findex index data/gutenberg --out index.bin --executor threads --workers 4
+findex index data/gutenberg --out index.bin --executor serial
+```
+
+Оскільки на цій машині процеси виграють (див. нижче), **`--executor processes` з `--workers = os.cpu_count()` — типове**
+(з `--limit` або для `.jsonl` індексація лишається послідовною).
+
+## Таблиця вимірювань
+
+**Машина:** AMD Ryzen 5 5600X, 6 ядер / 12 логічних потоків; Windows 11; корпус 91 книга / 58 МБ; без позицій, layout `array`.
+Кожна клітинка = медіана 3 запусків, кожен запуск у новому процесі (`scripts/bench_lab5.py`). CPU time = CPU батьківського
+процесу + CPU воркер-процесів; RSS — пік робочого набору батьківського процесу; прискорення — відносно `serial` на 3.13 (12.33 с).
+
+| Interpreter | Executor | Workers | Wall, s | CPU, s | Peak RSS (parent), MiB | Merge, s | Speedup |
+|---|---|---|---|---|---|---|---|
+| 3.13 (GIL) | serial | 1 | 12.33 | 12.05 | 182 | 0.08 | 1.00x |
+| 3.13 (GIL) | processes | 1 | 14.58 | 11.70 | 410 | 0.08 | 0.85x |
+| 3.13 (GIL) | processes | 2 | 10.32 | 14.42 | 391 | 0.13 | 1.19x |
+| 3.13 (GIL) | processes | 4 | 6.88 | 14.09 | 393 | 0.20 | 1.79x |
+| 3.13 (GIL) | processes | 8 | 5.92 | 16.61 | 399 | 0.26 | 2.08x |
+| 3.13 (GIL) | processes | 12 | 5.66 | 20.72 | 314 | 0.31 | 2.18x |
+| 3.13 (GIL) | threads | 1 | 11.02 | 10.91 | 180 | 0.07 | 1.12x |
+| 3.13 (GIL) | threads | 2 | 12.04 | 11.89 | 195 | 0.13 | 1.02x |
+| 3.13 (GIL) | threads | 4 | 11.51 | 11.48 | 218 | 0.19 | 1.07x |
+| 3.13 (GIL) | threads | 8 | 11.28 | 11.27 | 241 | 0.20 | 1.09x |
+| 3.13 (GIL) | threads | 12 | 11.75 | 11.67 | 255 | 0.23 | 1.05x |
+| 3.13t (no GIL) | serial | 1 | 12.20 | 12.12 | 200 | 0.11 | 1.01x |
+| 3.13t (no GIL) | threads | 1 | 12.66 | 12.67 | 205 | 0.13 | 0.97x |
+| 3.13t (no GIL) | threads | 2 | 8.55 | 16.30 | 241 | 0.18 | 1.44x |
+| 3.13t (no GIL) | threads | 4 | 4.93 | 16.36 | 269 | 0.27 | 2.50x |
+| 3.13t (no GIL) | threads | 8 | 4.06 | 18.88 | 349 | 0.34 | 3.03x |
+| 3.13t (no GIL) | threads | 12 | 4.20 | 22.61 | 419 | 0.40 | 2.94x |
+
+![Прискорення від числа воркерів](docs/speedup.png)
+
+Підсумок: потоки під GIL ≈ 1.0–1.1× (не прискорюють), процеси — до 2.18×, потоки на 3.13t — до 3.03×; усе далеко від
+ідеальної лінії (закон Амдала, вартість pickle, нерівні чанки). Повний розбір: [docs/gil.md](docs/gil.md) —
+чому потоки не допомогли, чим оплачено виграш процесів (CPU time проти wall time, RSS), де видно Амдала, що змінилось на 3.13t.
+
+## 3.13t без GIL
+
+```bash
+uv python install 3.13t
+uv venv --python 3.13t .venv-ft && PYTHONPATH=src .venv-ft/Scripts/python.exe scripts/bench_lab5.py data/gutenberg --executors serial,threads
+```
+
+`sys._is_gil_enabled()` повертає **`False`** у цій збірці (вивід в JSON як `"gil": false`; `python 3.13.18 experimental
+free-threading build`). Залежність `typer` → `pydantic-core` не має колеса для 3.13t, тому в цьому оточенні `findex`
+запускається з `PYTHONPATH=src` — індексаторові потрібна лише стандартна бібліотека.
+
+**Гонка.** Спільні `int` і `Counter` без блокування на 3.13t гублять оновлення (7 % та 79 % із 1 600 000), а на 3.13 з GIL у тесті
+втрат не було; з `threading.Lock` — нуль втрат. Таблиця, опис і фікс — у [docs/gil.md](docs/gil.md) (`scripts/race_demo.py`).

@@ -22,3 +22,4 @@ eval_*.err
 .hypothesis/
 .pytest_cache/
 bench_*.md
+.venv-ft/

@@ -7,6 +7,7 @@ single ``error: ...`` line to stderr and exit with status 1, with no traceback.
 
 import json
 import logging
+import os
 import pickle
 import sys
 from collections.abc import Iterable, Iterator
@@ -27,6 +28,7 @@ from rich.table import Table
 from . import __version__
 from .corpus import Document, iter_documents, read_text
 from .index import Index, Layout, build_index
+from .parallel import ExecutorName, build_parallel
 from .query import QueryError, parse
 from .ranking import search as ranked_search
 from .scoring import BM25, Scorer, TfIdf
@@ -111,10 +113,20 @@ def index(
     layout: Annotated[Layout, typer.Option(help="Postings storage layout")] = "array",
     fmt: Annotated[Format, typer.Option("--format", help="File format")] = "binary",
     limit: Annotated[int | None, typer.Option(help="Only the first N documents")] = None,
+    workers: Annotated[int, typer.Option(min=1, help="Parallel workers [default: CPU count]")] = os.cpu_count() or 1,
+    executor: Annotated[
+        ExecutorName, typer.Option(help="serial | threads | processes (fastest on a GIL build, see README)")
+    ] = "processes",
 ) -> None:
     """Build an index from a corpus and save it."""
     if not root.exists():
         raise _fail(f"corpus not found: {root}")
+    if executor != "serial" and root.is_dir() and limit is None:
+        log.info("parallel build: executor=%s workers=%d", executor, workers)
+        pidx = build_parallel(root, workers, executor, positions, layout)
+        save(pidx, out, fmt)
+        typer.echo(f"indexed {pidx.num_docs} documents, {len(pidx)} terms -> {out}")
+        return
     total = _count_docs(root)
     docs: Iterable[Document] = iter_documents(root)
     if limit is not None:

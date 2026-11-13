@@ -25,7 +25,7 @@ def test_version() -> None:
 
 def test_index_then_search_then_stats(corpus_dir: Path, tmp_path: Path) -> None:
     out = tmp_path / "i.bin"
-    r = runner.invoke(app, ["index", str(corpus_dir), "--out", str(out), "--positions"])
+    r = runner.invoke(app, ["index", str(corpus_dir), "--out", str(out), "--positions", "--executor", "serial"])
     assert r.exit_code == 0, r.output
     assert "indexed 4 documents" in r.stdout
     assert out.is_file()
