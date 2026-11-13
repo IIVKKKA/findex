@@ -63,7 +63,7 @@ class ArrayPostings:
     positions: array[int] | None = None
 
 
-Postings = list[Posting] | list[PlainPosting] | ArrayPostings
+Postings = list[Posting | PlainPosting] | ArrayPostings
 
 
 class Index(Mapping[str, list[Posting]]):
@@ -180,7 +180,7 @@ def build_index(
 
     doc_ids are increasing, so every postings list is sorted by construction.
     """
-    obj_postings: defaultdict[str, list] = defaultdict(list)
+    obj_postings: defaultdict[str, list[Posting | PlainPosting]] = defaultdict(list)
     arr_postings: defaultdict[str, ArrayPostings] = defaultdict(ArrayPostings)
     doc_lengths: dict[int, int] = {}
     doc_meta: dict[int, DocMeta] = {}
@@ -189,6 +189,7 @@ def build_index(
     for doc in docs:
         doc_meta[doc.doc_id] = DocMeta(str(doc.path), _title(doc.text))
         n = 0
+        items: list[tuple[str, int, list[int] | None]]
         if positions:
             pos: defaultdict[str, list[int]] = defaultdict(list)
             for i, tok in enumerate(tokenize(doc.text)):
@@ -217,7 +218,11 @@ def build_index(
                     make(doc.doc_id, tf, tuple(plist) if plist is not None else ())
                 )
 
-    final: dict = dict(arr_postings if layout == "array" else obj_postings)
+    final: dict[str, Postings] = {}
+    if layout == "array":
+        final.update(arr_postings)
+    else:
+        final.update(obj_postings)
     return Index(final, doc_lengths, doc_meta, layout, positions)
 
 

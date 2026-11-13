@@ -10,7 +10,7 @@ _APOS = "'’ʼ"
 
 
 def _pattern(terms: Iterable[str]) -> re.Pattern[str] | None:
-    alts = []
+    alts: list[str] = []
     for t in sorted(set(terms), key=len, reverse=True):
         alts.append("".join(f"[{_APOS}]" if ch == "'" else re.escape(ch) for ch in t))
     if not alts:

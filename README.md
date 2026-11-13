@@ -1,4 +1,5 @@
 # findex
+[![CI](https://github.com/IIVKKKA/findex/actions/workflows/ci.yml/badge.svg)](https://github.com/IIVKKKA/findex/actions/workflows/ci.yml)
 
 Власна пошукова система, яку будуємо поетапно (курс Python, лаби 1–8).
 Цей тег: **lab-01** — лінивий потік документів, потоковий токенізатор, статистика корпусу.
@@ -287,3 +288,52 @@ CacheInfo(hits=1, misses=1, maxsize=256, currsize=1)
 
 Вікно ±80 символів навколо входження, що покриває найбільше різних термів запиту; терми підсвічено `**...**`.
 
+
+
+---
+
+# Лаба 4 — типи, тести, пакування, CLI (тег `lab-04`, реліз `v0.4.0`)
+
+Тепер `findex` ставиться однією командою й працює з будь-якого каталогу:
+
+```bash
+uv tool install .                     # або: pip install findex-0.4.0-py3-none-any.whl (з GitHub Release)
+findex index data/gutenberg --out index.bin --positions     # смуга прогресу rich (у stderr)
+findex search index.bin 'whale AND (harpoon OR ship) NOT "moby dick"' -k 5   # таблиця rich
+findex search index.bin whale --json > hits.json            # чистий JSON у stdout
+findex stats index.bin
+findex -v search ...    # логи INFO у stderr;  -vv — DEBUG
+```
+
+* **Помилки.** Очікувана помилка (немає файлу індексу, зламаний запит, пошкоджений файл, немає корпусу) — один рядок
+  `error: ...` у stderr і код виходу 1, без стека викликів. Діагностика йде в stderr через `logging`,
+  логер налаштовується один раз у колбеку CLI (`cli.py`); результати — у stdout, тому `--json` можна перенаправляти.
+* **Типи.** `typeCheckingMode = "strict"` для `src/` і `tests/`, `pyright`: **0 помилок**. `Scorer` — `typing.Protocol`
+  (обидві реалізації перевіряються структурно, без наслідування); генератори позначені `Iterator`/`Generator`; `engine`,
+  `scorer`, `layout`, `format` — `Literal`. Скрипти вимірювань у `scripts/` — одноразові й до перевірки не входять.
+  Кожен `# type: ignore` має коментар, навіщо він (напр. присвоєння полю frozen-датакласу в тесті, що очікує `AttributeError`).
+* **Пакування.** `pyproject.toml`: метадані, залежності (`typer`, `rich`), група `dev`
+  (`pytest`, `pytest-cov`, `hypothesis`, `pyright`, `ruff`), `[project.scripts] findex = "findex.cli:app"`; `uv.lock` закомічено.
+  Версія береться з метаданих пакета (`findex --version` → `findex 0.4.0`).
+* **CI.** GitHub Actions на кожен push і PR: `uv sync`, `ruff`, `pyright`, `pytest --cov` (бейдж вгорі README).
+* **Реліз.** Тег `v0.4.0`, wheel `findex-0.4.0-py3-none-any.whl` прикріплено до GitHub Release; перевірено в чистому
+  віртуальному оточенні: `pip`-встановлення wheel → `findex --help` працює.
+
+## Тести і покриття
+
+150 тестів у `tests/` (разом із параметризацією): токенізатор (parametrize, Unicode), збірка індексу на малому корпусі
+(`conftest.py`, усі три layout), merge, парсер запитів (порівняння дерев), обидва скорери (три перевірки з лаби 3),
+save/load (pickle і бінарний), CLI через `typer.testing.CliRunner`. Три властивості Hypothesis (`tests/test_properties.py`):
+`load(save(index))` дає той самий індекс; постінги завжди відсортовані, а сума `tf` документа = його довжині;
+merge збігається з операціями над `set`. Тести довші за секунду позначено `@pytest.mark.slow`
+(`pytest -m "not slow"` їх пропускає).
+
+```bash
+uv run pytest --cov            # покриття: 85 % (гілки включено)
+uv run ruff check . && uv run pyright
+```
+
+**Що навмисно лишилось поза покриттям:** застарілі точки входу `python -m findex.index` / `python -m findex.search`
+(argparse; з лаб 1–2, їх замінює `findex`; код merge/пошуку звідти покрито окремо), `python -m findex.stats`
+(`main()` лаби 1; перевіряється лише порівняння lazy/eager), скрипт завантаження корпусу (мережа), рідкісні гілки читання
+`.jsonl` і недекодованих файлів та гілки `__main__`.

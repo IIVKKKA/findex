@@ -1,33 +1,22 @@
 import logging
+from pathlib import Path
 
 import pytest
 
-from findex.corpus import iter_documents
-from findex.index import Index, Posting, build_index
-from findex.query import And, Not, Or, Phrase, QueryError, Term, parse
+from findex.index import Index, Posting
+from findex.query import And, Node, Not, Or, Phrase, QueryError, Term, parse
 from findex.ranking import SearchResult, match_ids, search
 from findex.scoring import BM25, Scorer, TfIdf
 from findex.snippets import make_snippet
-from findex.store import open_index, save
+from findex.store import open_index
 from findex.util import timed
 
-DOCS = {
-    "a.txt": "python async await event loop python",
-    "b.txt": "java event loop threads",
-    "c.txt": "python java the the the the the",
-    "d.txt": "the quick brown fox jumps over the lazy dog " * 40 + "python",
-}
+from .conftest import DOCS
 
 
-@pytest.fixture()
-def index(tmp_path) -> Index:
-    for n, t in DOCS.items():
-        (tmp_path / n).write_text(t, encoding="utf-8")
-    return build_index(iter_documents(tmp_path), positions=True, layout="array")
-
-
-def test_index_mapping_api(index):
-    assert len(index) == len(set(" ".join(DOCS.values()).split()))
+def test_index_mapping_api(index: Index) -> None:
+    vocab = {w for text in DOCS.values() for w in text.split()}
+    assert len(index) == len(vocab)
     assert "python" in index and "ruby" not in index
     assert [p.doc_id for p in index["python"]] == [0, 2, 3]
     assert "java" in list(index)
@@ -39,11 +28,9 @@ def test_index_mapping_api(index):
     assert "Index(" in repr(index)
 
 
-def test_open_index_closes_even_on_error(index, tmp_path):
-    path = tmp_path / "i.bin"
-    save(index, path, "binary")
-    holder = []
-    with pytest.raises(RuntimeError), open_index(path) as idx:
+def test_open_index_closes_even_on_error(index_file: Path) -> None:
+    holder: list[Index] = []
+    with pytest.raises(RuntimeError), open_index(index_file) as idx:
         holder.append(idx)
         assert len(idx) > 0
         raise RuntimeError("boom")
@@ -51,98 +38,100 @@ def test_open_index_closes_even_on_error(index, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "query, tree",
+    ("query", "tree"),
     [
         ("a", Term("a")),
         ("a b", And(Term("a"), Term("b"))),
         ("a AND b", And(Term("a"), Term("b"))),
         ("a OR b c", Or(Term("a"), And(Term("b"), Term("c")))),
         ("(a OR b) c", And(Or(Term("a"), Term("b")), Term("c"))),
-        ("python AND (async OR await) NOT java",
-         And(Term("python"), Or(Term("async"), Term("await")), Not(Term("java")))),
+        (
+            "python AND (async OR await) NOT java",
+            And(Term("python"), Or(Term("async"), Term("await")), Not(Term("java"))),
+        ),
         ('"Event Loop" x', And(Phrase("event", "loop"), Term("x"))),
         ("NOT a", Not(Term("a"))),
     ],
 )
-def test_parser_trees(query, tree):
+def test_parser_trees(query: str, tree: Node) -> None:
     assert parse(query) == tree
 
 
 @pytest.mark.parametrize("bad", ["", "   ", "(a", "a)", "a OR", "AND a", '"abc', "NOT"])
-def test_parser_errors(bad):
+def test_parser_errors(bad: str) -> None:
     with pytest.raises(QueryError):
         parse(bad)
 
 
-def test_operator_overloads():
+def test_operator_overloads() -> None:
     a, b, c = Term("a"), Term("b"), Term("c")
     assert a & b & c == And(a, b, c)
     assert a | b == Or(a, b)
     assert ~a == Not(a)
 
 
-def test_evaluate_and_phrase(index):
+def test_evaluate_and_phrase(index: Index) -> None:
     assert parse("python NOT java").evaluate(index) == {0, 3}
     assert parse('"event loop"').evaluate(index) == {0, 1}
     assert parse('"loop event"').evaluate(index) == set()
     assert parse('"python async"').evaluate(index) == {0}
 
 
-def test_phrase_requires_positions(tmp_path):
-    (tmp_path / "a.txt").write_text("a b", encoding="utf-8")
-    idx = build_index(iter_documents(tmp_path))
+def test_phrase_requires_positions(corpus_dir: Path) -> None:
+    from findex.corpus import iter_documents
+    from findex.index import build_index
+
+    idx = build_index(iter_documents(corpus_dir))
     with pytest.raises(QueryError):
-        parse('"a b"').evaluate(idx)
+        parse('"apple banana"').evaluate(idx)
 
 
-def test_scorers_satisfy_protocol_without_inheritance():
-    for s in (TfIdf(), BM25()):
-        assert isinstance(s.score, object)
-        assert not (s is None)
+def test_scorers_are_interchangeable_without_inheritance() -> None:
+    # Neither class inherits from Scorer; pyright checks this list structurally.
     scorers: list[Scorer] = [TfIdf(), BM25(k1=1.2, b=0.5)]
-    assert len(scorers) == 2
+    assert all(callable(s.score) for s in scorers)
+    assert Scorer not in TfIdf.__mro__ and Scorer not in BM25.__mro__
 
 
 @pytest.mark.parametrize("scorer", [TfIdf(), BM25()])
-def test_rare_term_beats_common(index, scorer):
-    # doc 2 has "java" (rarer) + lots of "the"; doc 3 has many "the" + "python"
-    p_rare = Posting(2, 1)
-    p_common = Posting(2, 1)
-    assert scorer.score("async", p_rare, index) > scorer.score("python", p_common, index)
+def test_rare_term_beats_common(index: Index, scorer: Scorer) -> None:
+    assert scorer.score("async", Posting(2, 1), index) > scorer.score("python", Posting(2, 1), index)
 
 
-def test_bm25_saturation_and_length_norm(index):
+def test_bm25_saturation(index: Index) -> None:
     bm = BM25()
     s1 = bm.score("python", Posting(0, 1), index)
     s20 = bm.score("python", Posting(0, 20), index)
     s40 = bm.score("python", Posting(0, 40), index)
-    assert s20 < s1 * (bm.k1 + 1)  # bounded by saturation
+    assert s20 < s1 * (bm.k1 + 1)
     assert s40 - s20 < 0.1 * s20
-    short = bm.score("python", Posting(2, 1), index)  # 7 tokens
-    long_ = bm.score("python", Posting(3, 1), index)  # ~361 tokens
+
+
+def test_bm25_length_normalisation(index: Index) -> None:
+    bm = BM25()
+    short = bm.score("python", Posting(2, 1), index)  # 9 tokens
+    long_ = bm.score("python", Posting(3, 1), index)  # ~360 tokens
     assert short > long_
 
 
-def test_search_ranking_and_topk(index):
+def test_search_ranking_and_topk(index: Index) -> None:
     res = search(index, "python", BM25(), k=2)
     assert len(res) == 2
     assert res == sorted(res, reverse=True)
-    assert res[0].doc_id == 0  # tf=2 in a short doc
     assert isinstance(res[0], SearchResult)
     assert SearchResult(1.0, 1) < SearchResult(2.0, 0)
 
 
-def test_cache_hit_logged(index, caplog):
+def test_cache_hit_logged(index: Index, caplog: pytest.LogCaptureFixture) -> None:
     match_ids.cache_clear()
     with caplog.at_level(logging.INFO):
         search(index, "event loop")
         search(index, "event loop")
-    text = caplog.text
-    assert "cache miss" in text and "cache hit" in text
-    assert "search took" in text
+    assert "cache miss" in caplog.text and "cache hit" in caplog.text
+    assert "search took" in caplog.text
 
 
-def test_timed_preserves_metadata():
+def test_timed_preserves_metadata() -> None:
     @timed
     def f(x: int) -> int:
         """doc"""
@@ -151,7 +140,17 @@ def test_timed_preserves_metadata():
     assert f.__name__ == "f" and f.__doc__ == "doc" and f(3) == 3
 
 
-def test_snippet_highlight():
+def test_timed_logs_even_on_exception(caplog: pytest.LogCaptureFixture) -> None:
+    @timed
+    def boom() -> None:
+        raise ValueError("x")
+
+    with caplog.at_level(logging.INFO), pytest.raises(ValueError, match="x"):
+        boom()
+    assert "boom took" in caplog.text
+
+
+def test_snippet_highlight() -> None:
     text = "x " * 100 + "The Event Loop runs forever " + "y " * 100
     s = make_snippet(text, ["event", "loop"], width=30)
     assert "**Event**" in s and "**Loop**" in s

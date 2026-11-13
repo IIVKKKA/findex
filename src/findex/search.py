@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
-from .corpus import _read_text
+from .corpus import read_text
 from .index import Index
 from .store import load
 from .tokenize import tokenize
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"top {len(results)} for {args.query!r} (scorer={args.scorer})")
         for r in results:
             m = index.doc_meta[r.doc_id]
-            text = _read_text(Path(m.path)) or ""
+            text = read_text(Path(m.path)) or ""
             print(f"  [{r.doc_id}] {r.score:.3f}  {m.title}  ({Path(m.path).name})")
             print(f"      {make_snippet(text, terms)}")
     _, peak = tracemalloc.get_traced_memory()

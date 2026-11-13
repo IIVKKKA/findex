@@ -17,3 +17,8 @@ index.bin
 *.log
 eval_*.md
 eval_*.err
+
+.coverage
+.hypothesis/
+.pytest_cache/
+bench_*.md

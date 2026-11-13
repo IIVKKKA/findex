@@ -15,12 +15,12 @@ import json
 import pickle
 import struct
 from array import array
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, Literal
+from typing import Any, BinaryIO, Literal
 
-from .index import ArrayPostings, DocMeta, Index, Posting
+from .index import ArrayPostings, DocMeta, Index, Posting, Postings
 from .util import timed
 
 MAGIC = b"FIDX1"
@@ -36,7 +36,7 @@ def save(index: Index, path: Path, fmt: Format = "pickle") -> None:
 
 
 @contextmanager
-def open_index(path: str | Path) -> Iterator[Index]:
+def open_index(path: str | Path) -> Generator[Index]:
     """``with open_index(p) as index:`` - loads on enter, releases on exit.
 
     The release runs in ``finally`` so it happens when the body raises, and the
@@ -63,10 +63,11 @@ def load(path: Path) -> Index:
         fh.seek(0)
         if head == MAGIC:
             return _load_binary(fh)
-        return pickle.load(fh)
+        index: Index = pickle.load(fh)
+        return index
 
 
-def _as_arrays(p) -> tuple[array, array, array]:
+def _as_arrays(p: Postings) -> tuple[array[int], array[int], array[int]]:
     if isinstance(p, ArrayPostings):
         return p.doc_ids, p.tfs, p.positions if p.positions is not None else array("I")
     ids = array("I", (x.doc_id for x in p))
@@ -98,8 +99,8 @@ def _save_binary(index: Index, path: Path) -> None:
                 pos.tofile(fh)
 
 
-def _read_array(fh: BinaryIO, n: int) -> array:
-    a = array("I")
+def _read_array(fh: BinaryIO, n: int) -> array[int]:
+    a: array[int] = array("I")
     if n:
         a.fromfile(fh, n)
     return a
@@ -108,19 +109,19 @@ def _read_array(fh: BinaryIO, n: int) -> array:
 def _load_binary(fh: BinaryIO) -> Index:
     fh.read(len(MAGIC))
     (hlen,) = struct.unpack("<I", fh.read(4))
-    header = json.loads(fh.read(hlen).decode("utf-8"))
-    meta = {int(i): DocMeta(*v) for i, v in header["doc_meta"].items()}
+    header: dict[str, Any] = json.loads(fh.read(hlen).decode("utf-8"))
+    meta = {int(i): DocMeta(str(v[0]), str(v[1])) for i, v in header["doc_meta"].items()}
     n_docs = len(meta)
     ids = _read_array(fh, n_docs)
     lens = _read_array(fh, n_docs)
     doc_lengths = dict(zip(ids, lens, strict=True))
-    has_pos = header["positions"]
-    postings: dict[str, ArrayPostings] = {}
+    has_pos = bool(header["positions"])
+    postings: dict[str, Postings] = {}
     for term, n in header["terms"]:
-        d = _read_array(fh, n)
-        tf = _read_array(fh, n)
+        d = _read_array(fh, int(n))
+        tf = _read_array(fh, int(n))
         pos = _read_array(fh, sum(tf)) if has_pos else None
-        postings[term] = ArrayPostings(d, tf, pos)
+        postings[str(term)] = ArrayPostings(d, tf, pos)
     return Index(postings, doc_lengths, meta, "array", has_pos)
 
 

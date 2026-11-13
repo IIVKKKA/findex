@@ -17,7 +17,7 @@ class Document(NamedTuple):
     text: str
 
 
-def _read_text(path: Path) -> str | None:
+def read_text(path: Path) -> str | None:
     """Read a file as UTF-8, falling back to cp1252; None if undecodable."""
     raw = path.read_bytes()
     for enc in ("utf-8", "cp1252"):
@@ -33,7 +33,7 @@ def _iter_txt(root: Path) -> Iterator[Document]:
     doc_id = 0
     for path in sorted(root.rglob("*.txt")):
         try:
-            text = _read_text(path)
+            text = read_text(path)
         except OSError as exc:
             log.warning("cannot read %s: %s", path, exc)
             continue

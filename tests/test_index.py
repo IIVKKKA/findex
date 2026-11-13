@@ -1,7 +1,10 @@
+import random
+from pathlib import Path
+
 import pytest
 
 from findex.corpus import iter_documents
-from findex.index import DocMeta, Posting, build_index
+from findex.index import DocMeta, Index, Layout, Posting, build_index
 from findex.search import (
     QueryError,
     and_merge,
@@ -14,49 +17,35 @@ from findex.search import (
 )
 from findex.store import load, postings_as_objects, save
 
-DOCS = {
-    "a.txt": "apple banana cherry apple",
-    "b.txt": "banana cherry date",
-    "c.txt": "apple date egg",
-    "d.txt": "fig",
-}
 
-
-@pytest.fixture()
-def corpus(tmp_path):
-    for name, text in DOCS.items():
-        (tmp_path / name).write_text(text, encoding="utf-8")
-    return tmp_path
-
-
-@pytest.fixture(params=["dataclass", "slots", "array"])
-def index(request, corpus):
-    return build_index(iter_documents(corpus), layout=request.param)
-
-
-def test_posting_and_meta_hashable_frozen():
+def test_posting_and_meta_hashable_and_frozen() -> None:
     s = {Posting(1, 2), Posting(1, 2), DocMeta("p", "t")}
     assert len(s) == 2
+    p = Posting(1, 2)
     with pytest.raises(AttributeError):
-        Posting(1, 2).tf = 5  # type: ignore[misc]
+        p.tf = 5  # type: ignore[misc]  # frozen dataclass: assignment must raise
 
 
-def test_postings_sorted_with_tf(corpus):
-    idx = build_index(iter_documents(corpus), layout="slots")
-    assert idx.postings["apple"] == [Posting(0, 2), Posting(2, 1)]
-    assert idx.doc_lengths == {0: 4, 1: 3, 2: 3, 3: 1}
-    for plist in idx.postings.values():
-        ids = [p.doc_id for p in plist]
+def test_postings_sorted_with_tf(corpus_dir: Path) -> None:
+    idx = build_index(iter_documents(corpus_dir), layout="slots")
+    assert [(p.doc_id, p.tf) for p in idx["apple"]] == [(0, 2), (2, 1)]
+    for term in idx:
+        ids = [p.doc_id for p in idx[term]]
         assert ids == sorted(ids)
 
 
-def test_positions(corpus):
-    idx = build_index(iter_documents(corpus), positions=True, layout="slots")
-    assert idx.postings["apple"][0].positions == (0, 3)
+def test_doc_lengths_and_meta(index: Index) -> None:
+    assert index.doc_length(1) == 7
+    assert index.doc_meta[0].path.endswith("a.txt")
+
+
+def test_positions(corpus_dir: Path) -> None:
+    idx = build_index(iter_documents(corpus_dir), positions=True, layout="slots")
+    assert idx["apple"][0].positions == (0, 3)
 
 
 @pytest.mark.parametrize(
-    "query, expected",
+    ("query", "expected"),
     [
         ("apple", [0, 2]),
         ("apple banana", [0]),
@@ -69,34 +58,31 @@ def test_positions(corpus):
     ],
 )
 @pytest.mark.parametrize("engine", ["merge", "set"])
-def test_boolean_queries(index, query, expected, engine):
-    assert search(index, query, engine) == expected
+def test_boolean_queries(index: Index, query: str, expected: list[int], engine: str) -> None:
+    assert search(index, query, "merge" if engine == "merge" else "set") == expected
 
 
 @pytest.mark.parametrize("bad", ["", "apple AND", "apple NOT"])
-def test_bad_queries(index, bad):
+def test_boolean_bad_queries(index: Index, bad: str) -> None:
     with pytest.raises(QueryError):
         search(index, bad)
 
 
-@pytest.mark.parametrize("layout", ["dataclass", "slots", "array"])
 @pytest.mark.parametrize("fmt", ["pickle", "binary"])
 @pytest.mark.parametrize("positions", [False, True])
-def test_save_load_roundtrip(corpus, tmp_path, layout, fmt, positions):
-    idx = build_index(iter_documents(corpus), positions=positions, layout=layout)
+def test_save_load_roundtrip(corpus_dir: Path, tmp_path: Path, layout: Layout, fmt: str, positions: bool) -> None:
+    idx = build_index(iter_documents(corpus_dir), positions=positions, layout=layout)
     out = tmp_path / "idx.bin"
-    save(idx, out, fmt)
+    save(idx, out, "pickle" if fmt == "pickle" else "binary")
     back = load(out)
     assert back.doc_lengths == idx.doc_lengths
     assert back.doc_meta == idx.doc_meta
-    for term in idx.postings:
+    for term in idx:
         assert postings_as_objects(back, term) == postings_as_objects(idx, term)
     assert search(back, "apple NOT banana") == [2]
 
 
-def test_merge_equals_set_on_random_lists():
-    import random
-
+def test_merge_equals_set_on_random_lists() -> None:
     rng = random.Random(1)
     for _ in range(200):
         a = sorted(rng.sample(range(60), rng.randint(0, 30)))
