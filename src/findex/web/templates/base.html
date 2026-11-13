@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}findex{% endblock %}</title>
+<style>
+  :root { --bg:#f7f7f4; --card:#fff; --text:#1d1d1f; --muted:#6b6b72; --accent:#2f5bea; --line:#e5e5e0; --mark:#ffe58a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16171a; --card:#1f2024; --text:#ececee; --muted:#9a9aa3; --accent:#8aa4ff; --line:#2e2f35; --mark:#6b5a12; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; }
+  header { padding: 40px 0 20px; }
+  header a.brand { font-size: 28px; font-weight: 700; color: var(--text); text-decoration: none; letter-spacing: -0.02em; }
+  header a.brand span { color: var(--accent); }
+  p.tag { margin: 4px 0 0; color: var(--muted); }
+  form.search { display:flex; gap:8px; flex-wrap:wrap; margin: 18px 0 8px; }
+  input[type=search] { flex:1 1 320px; padding: 12px 14px; font-size: 16px; border:1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); }
+  select, button { padding: 12px 14px; font-size: 15px; border-radius: 10px; border:1px solid var(--line); background: var(--card); color: var(--text); }
+  button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; font-weight: 600; }
+  .hint { color: var(--muted); font-size: 14px; }
+  .hint code, .chips a { background: var(--card); border:1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top: 10px; }
+  .chips a { color: var(--accent); text-decoration:none; font-size: 14px; padding: 3px 10px; border-radius: 999px; }
+  .meta { color: var(--muted); font-size: 14px; margin: 18px 0 8px; }
+  .hit { background: var(--card); border:1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+  .hit h3 { margin: 0 0 4px; font-size: 18px; }
+  .hit h3 a { color: var(--accent); text-decoration: none; }
+  .hit h3 a:hover { text-decoration: underline; }
+  .hit .score { color: var(--muted); font-size: 13px; }
+  .hit p { margin: 6px 0 0; color: var(--text); word-break: break-word; }
+  mark { background: var(--mark); color: inherit; padding: 0 2px; border-radius: 3px; }
+  .pager { display:flex; justify-content:space-between; margin-top: 20px; }
+  .pager a { color: var(--accent); text-decoration: none; padding: 8px 14px; border:1px solid var(--line); border-radius: 10px; background: var(--card); }
+  .err { background: #fde8e8; color: #7a1a1a; border:1px solid #f3b6b6; padding: 10px 14px; border-radius: 10px; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 40px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .doc { background: var(--card); border:1px solid var(--line); border-radius: 12px; padding: 18px 20px; white-space: pre-wrap; word-break: break-word; font-family: Georgia, serif; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="/">find<span>ex</span></a>
+    <p class="tag">A tiny search engine over Project Gutenberg books, written in Python.</p>
+  </header>
+  {% block content %}{% endblock %}
+  <footer>findex {{ version }} &middot; <a href="/api/docs" style="color:inherit">API docs</a> &middot; <a href="https://github.com/IIVKKKA/findex" style="color:inherit">source</a></footer>
+</div>
+</body>
+</html>

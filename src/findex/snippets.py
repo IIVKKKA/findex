@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Iterable
 
 _APOS = "'’ʼ"
@@ -33,13 +34,21 @@ def make_snippet(
     if not matches:
         return " ".join(text[: 2 * width].split())
 
+    # Sliding window over the (sorted) matches: O(M) instead of comparing every pair (O(M^2) was
+    # a real problem on long books, found while load-testing lab 7).
     best_i, best_n = 0, -1
+    seen: Counter[str] = Counter()
+    lo_i = hi_i = 0
     for i, m in enumerate(matches):
-        seen = {
-            m2.group().casefold()
-            for m2 in matches
-            if abs(m2.start() - m.start()) <= width
-        }
+        while hi_i < len(matches) and matches[hi_i].start() <= m.start() + width:
+            seen[matches[hi_i].group().casefold()] += 1
+            hi_i += 1
+        while matches[lo_i].start() < m.start() - width:
+            key = matches[lo_i].group().casefold()
+            seen[key] -= 1
+            if not seen[key]:
+                del seen[key]
+            lo_i += 1
         if len(seen) > best_n:
             best_i, best_n = i, len(seen)
     centre = matches[best_i]

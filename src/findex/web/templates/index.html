@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{% if q %}{{ q }} - {% endif %}findex{% endblock %}
+{% block content %}
+<form class="search" action="/" method="get" role="search">
+  <input type="search" name="q" value="{{ q }}" placeholder='whale AND (harpoon OR ship) NOT "moby dick"' aria-label="Search query" autofocus>
+  <select name="scorer" aria-label="Ranking function">
+    <option value="bm25" {% if scorer == "bm25" %}selected{% endif %}>BM25</option>
+    <option value="tfidf" {% if scorer == "tfidf" %}selected{% endif %}>TF-IDF</option>
+  </select>
+  <button type="submit">Search</button>
+</form>
+<div class="hint">Operators: <code>AND</code> <code>OR</code> <code>NOT</code>, parentheses, <code>"exact phrase"</code>. {{ "{:,}".format(docs) }} documents, {{ "{:,}".format(terms) }} terms.</div>
+
+{% if error %}
+  <p class="err" role="alert">{{ error }}</p>
+{% endif %}
+
+{% if not q %}
+  <div class="chips" aria-label="Example queries">
+    {% for ex in ['white whale', 'paradise OR satan', 'internet OR email', 'census population', '"time machine"', 'guillotine OR revolution'] %}
+      <a href="/?q={{ ex | urlencode }}">{{ ex }}</a>
+    {% endfor %}
+  </div>
+{% elif result %}
+  <div class="meta">{{ "{:,}".format(result.total) }} matching document{{ "" if result.total == 1 else "s" }} &middot; page {{ result.page }} of {{ result.pages }}</div>
+  {% for hit in result.results %}
+    <article class="hit">
+      <h3><a href="/view/{{ hit.doc_id }}?q={{ q | urlencode }}">{{ hit.title }}</a></h3>
+      <div class="score">score {{ "%.3f"|format(hit.score) }} &middot; doc {{ hit.doc_id }}</div>
+      {% if hit.snippet %}<p>{{ hit.snippet | mark }}</p>{% endif %}
+    </article>
+  {% else %}
+    <p>No results. Try fewer or different words.</p>
+  {% endfor %}
+  <nav class="pager">
+    {% if result.page > 1 %}<a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&page={{ result.page - 1 }}">&larr; Previous</a>{% else %}<span></span>{% endif %}
+    {% if result.page < result.pages %}<a href="/?q={{ q | urlencode }}&scorer={{ scorer }}&page={{ result.page + 1 }}">Next &rarr;</a>{% endif %}
+  </nav>
+{% endif %}
+{% endblock %}

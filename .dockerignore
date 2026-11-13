@@ -1,0 +1,13 @@
+.git
+.venv
+.venv-ft
+data
+index.bin
+dist
+docs
+tests
+*.log
+__pycache__
+.pytest_cache
+.hypothesis
+.ruff_cache

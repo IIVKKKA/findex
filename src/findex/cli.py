@@ -256,6 +256,23 @@ def search(
 
 
 @app.command()
+def serve(
+    index_path: Annotated[Path, typer.Option("--index", envvar="INDEX_PATH", help="Index file to serve")] = Path("index.bin"),
+    host: Annotated[str, typer.Option(help="Bind address (0.0.0.0 inside a container)")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port")] = 8000,
+    workers: Annotated[int, typer.Option(min=1, help="Server processes (each loads its own copy of the index)")] = 1,
+) -> None:
+    """Serve the search API and web page with uvicorn."""
+    import uvicorn
+
+    if not index_path.is_file():
+        raise _fail(f"index file not found: {index_path}")
+    os.environ["INDEX_PATH"] = str(index_path)  # read by web.settings in every worker process
+    uvicorn.run("findex.web.app:create_app", factory=True, host=host, port=port,
+                workers=workers if workers > 1 else None, log_level="info")
+
+
+@app.command()
 def stats(
     index_path: Annotated[Path, typer.Argument(help="Index file")],
     top: Annotated[int, typer.Option(help="How many most frequent terms to list")] = 10,

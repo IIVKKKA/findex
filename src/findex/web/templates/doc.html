@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - findex{% endblock %}
+{% block content %}
+<p><a href="/{% if q %}?q={{ q | urlencode }}{% endif %}" style="color:var(--accent)">&larr; Back to results</a></p>
+<h2>{{ title }}</h2>
+<div class="meta">document {{ doc_id }} &middot; {{ "{:,}".format(length) }} tokens</div>
+<div class="doc">{{ body | mark }}</div>
+{% if truncated %}<p class="hint">Showing the first 60,000 characters.</p>{% endif %}
+{% endblock %}
