@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-data/
+/data/
 dl.log
 bench_*.md
 bench_*.err
