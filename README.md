@@ -168,8 +168,3 @@ tests/        310 тестів: pytest, Hypothesis, CliRunner, TestClient, MockT
 scripts/      замірювальні скрипти кожної лаби (bench_lab5/6/7/8, eval_lab3/8, profile_*)
 docs/         labs.md (розбір по лабах), profiling.md, gil.md, flame_*.svg, data/ (сирі виміри)
 ```
-
-## Як зняти GIF і відео (їх має зробити автор)
-
-* **GIF** (5–10 с): `findex serve`, у браузері запит `giant sea creature hunted by sailors` у режимі Hybrid → ScreenToGif/LICEcap → `docs/demo.gif`, вставити під заголовок.
-* **Відео 2–3 хв:** сценарій — шлях даних (діаграма) → `findex index` → пошук у CLI → веб-сторінка → одна цифра з профілювання (474 → 37 мс) → один баг, на якому щось стало зрозуміло (квадратичний пошук вікна сніпета, що виявило навантажувальне тестування).
