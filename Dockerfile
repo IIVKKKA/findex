@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # ---- stage 1: build the virtualenv from uv.lock, download a small corpus, build the index ----
 FROM python:3.13-slim AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.13 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
